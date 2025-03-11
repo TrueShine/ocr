@@ -112,25 +112,68 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+enum class DocumentType(val label: String) {
+    CARD("카드"),
+    LICENSE("운전면허증")
+}
+
+
 @Composable
 fun FullScreenCard(modifier: Modifier = Modifier) {
     var detectedText by remember { mutableStateOf("") }
+    var selectedType by remember { mutableStateOf(DocumentType.CARD) }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        CameraPreview(
-            modifier = Modifier.fillMaxSize(),
-            onTextDetected = { detectedText = it }
+    Column(modifier = modifier.fillMaxSize()) {
+        // 상단 선택 바
+        DocumentSelector(
+            selectedType = selectedType,
+            onSelect = { selectedType = it }
         )
-        CardOverlay(modifier = Modifier.fillMaxSize())
 
-        if (detectedText.isNotBlank()) {
-            Text(
-                text = detectedText,
-                color = Color.White,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
+        // 카메라 및 OCR 뷰
+        Box(modifier = Modifier.fillMaxSize()) {
+            CameraPreview(
+                modifier = Modifier.fillMaxSize(),
+                onTextDetected = { detectedText = it },
+                selectedType = selectedType  // OCR에 전달
             )
+            CardOverlay(modifier = Modifier.fillMaxSize(), type = selectedType)
+
+            if (detectedText.isNotBlank()) {
+                Text(
+                    text = detectedText,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(16.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DocumentSelector(
+    selectedType: DocumentType,
+    onSelect: (DocumentType) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
+        DocumentType.values().forEach { type ->
+            val isSelected = type == selectedType
+            Button(
+                onClick = { onSelect(type) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isSelected) Color.Blue else Color.LightGray,
+                    contentColor = Color.White
+                )
+            ) {
+                Text(type.label)
+            }
         }
     }
 }
@@ -196,8 +239,15 @@ fun CameraPreview(
 fun CardOverlay(
     modifier: Modifier = Modifier,
     cornerRadiusDp: Dp = 12.dp,
-    cardRatio: Float = 1.586f
+    cardRatio: Float = 1.586f,
+    type: DocumentType
 ) {
+
+    val ratio = when (type) {
+            DocumentType.CARD -> 1.586f
+            DocumentType.LICENSE -> 1.4f
+        }
+
     Canvas(modifier = modifier) {
         val canvasWidth = size.width
         val canvasHeight = size.height
