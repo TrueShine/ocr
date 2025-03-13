@@ -11,29 +11,22 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.camera.core.Preview
-
+import j1n.uk.testocr.model.DocumentType
+import j1n.uk.testocr.ui.CameraPreview
+import j1n.uk.testocr.ui.CardOverlay
 import j1n.uk.testocr.ui.theme.TestOCRTheme
 
 class MainActivity : ComponentActivity() {
@@ -75,9 +68,7 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     if (cameraPermissionState.value) {
-                        FullScreenCard(
-                            modifier = Modifier.padding(innerPadding)
-                        )
+                        FullScreenOCR(modifier = Modifier.padding(innerPadding))
                     } else {
                         if (showSettingsPrompt) {
                             Box(
@@ -112,178 +103,63 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-enum class DocumentType(val label: String) {
-    CARD("카드"),
-    LICENSE("운전면허증")
-}
-
-
 @Composable
-fun FullScreenCard(modifier: Modifier = Modifier) {
+fun FullScreenOCR(modifier: Modifier = Modifier) {
     var detectedText by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(DocumentType.CARD) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // 상단 선택 바
-        DocumentSelector(
-            selectedType = selectedType,
-            onSelect = { selectedType = it }
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            DocumentType.values().forEach { type ->
+                Button(
+                    onClick = { selectedType = type },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedType == type) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                    )
+                ) {
+                    Text(type.label)
+                }
+            }
+        }
 
-        // 카메라 및 OCR 뷰
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
             CameraPreview(
-                modifier = Modifier.fillMaxSize(),
-                onTextDetected = { detectedText = it },
-                selectedType = selectedType  // OCR에 전달
+                type = selectedType.ocrType,
+                cardRectRatio = selectedType.rectRatio,
+                onTextFound = { detectedText = it }
             )
-            CardOverlay(modifier = Modifier.fillMaxSize(), type = selectedType)
 
+            CardOverlay(
+                modifier = Modifier.fillMaxSize()
+            )
             if (detectedText.isNotBlank()) {
-                Text(
-                    text = detectedText,
-                    color = Color.White,
+                Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(16.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun DocumentSelector(
-    selectedType: DocumentType,
-    onSelect: (DocumentType) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly
-    ) {
-        DocumentType.values().forEach { type ->
-            val isSelected = type == selectedType
-            Button(
-                onClick = { onSelect(type) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isSelected) Color.Blue else Color.LightGray,
-                    contentColor = Color.White
-                )
-            ) {
-                Text(type.label)
-            }
-        }
-    }
-}
-
-@Composable
-fun CameraPreview(
-    modifier: Modifier = Modifier,
-    onTextDetected: (String) -> Unit = {}
-) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    AndroidView(
-        modifier = modifier,
-        factory = { ctx ->
-            val previewView = PreviewView(ctx).apply {
-                scaleType = PreviewView.ScaleType.FILL_CENTER
-            }
-
-            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-
-            cameraProviderFuture.addListener({
-                val cameraProvider = cameraProviderFuture.get()
-
-                val preview = Preview.Builder().build().apply {
-                    setSurfaceProvider(previewView.surfaceProvider)
-                }
-
-                val imageAnalyzer = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-
-                imageAnalyzer.setAnalyzer(
-                    ContextCompat.getMainExecutor(ctx),
-                    TextAnalyzer { recognizedText ->
-                        Log.d("OCR", "Detected text: $recognizedText")
-                        onTextDetected(recognizedText)
-                    }
-                )
-
-                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                try {
-                    cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        cameraSelector,
-                        preview,
-                        imageAnalyzer
+                        .background(Color.Black.copy(alpha = 0.5f))
+                        .fillMaxWidth()
+                ) {
+                    Text(
+                        text = detectedText,
+                        color = Color.White,
+                        fontSize = if (detectedText.length > 200) 12.sp else 16.sp,
+                        modifier = Modifier.padding(8.dp),
+                        maxLines = 10,
+                        overflow = TextOverflow.Ellipsis
                     )
-                } catch (e: Exception) {
-                    e.printStackTrace()
                 }
+            }
 
-            }, ContextCompat.getMainExecutor(ctx))
-
-            previewView
         }
-    )
-}
-
-@Composable
-fun CardOverlay(
-    modifier: Modifier = Modifier,
-    cornerRadiusDp: Dp = 12.dp,
-    cardRatio: Float = 1.586f,
-    type: DocumentType
-) {
-
-    val ratio = when (type) {
-            DocumentType.CARD -> 1.586f
-            DocumentType.LICENSE -> 1.4f
-        }
-
-    Canvas(modifier = modifier) {
-        val canvasWidth = size.width
-        val canvasHeight = size.height
-
-        val cardWidth = canvasWidth * 0.85f
-        val cardHeight = cardWidth / cardRatio
-        val cardLeft = (canvasWidth - cardWidth) / 2f
-        val cardTop = (canvasHeight - cardHeight) / 2f
-
-        drawRect(
-            color = Color.Black.copy(alpha = 0.6f),
-            size = size
-        )
-
-        drawRoundRect(
-            color = Color.Transparent,
-            topLeft = Offset(cardLeft, cardTop),
-            size = Size(cardWidth, cardHeight),
-            cornerRadius = CornerRadius(cornerRadiusDp.toPx(), cornerRadiusDp.toPx()),
-            blendMode = BlendMode.Clear
-        )
-
-        drawRoundRect(
-            color = Color.White.copy(alpha = 0.4f),
-            topLeft = Offset(cardLeft, cardTop),
-            size = Size(cardWidth, cardHeight),
-            cornerRadius = CornerRadius(cornerRadiusDp.toPx(), cornerRadiusDp.toPx()),
-            style = Stroke(width = 2.dp.toPx())
-        )
-    }
-}
-
-// @Preview(showBackground = true)
-@Composable
-fun FullScreenCardPreview() {
-    TestOCRTheme {
-        FullScreenCard(modifier = Modifier)
     }
 }

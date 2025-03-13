@@ -1,61 +1,62 @@
 package j1n.uk.testocr
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
+import android.annotation.SuppressLint
+import android.graphics.*
 import android.media.Image
+import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import j1n.uk.testocr.model.OcrType
+import j1n.uk.testocr.model.RectFPercentage
 import java.io.ByteArrayOutputStream
 
 class TextAnalyzer(
+    private val type: OcrType,
+    private val cardRectRatio: RectFPercentage,
     private val onTextFound: (String) -> Unit
 ) : ImageAnalysis.Analyzer {
 
-    private val recognizer = TextRecognition.getClient(
-        KoreanTextRecognizerOptions.Builder().build()
-    )
+    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.Builder().build())
 
-    @androidx.camera.core.ExperimentalGetImage
+    @SuppressLint("UnsafeOptInUsageError")
     override fun analyze(imageProxy: ImageProxy) {
-        val mediaImage = imageProxy.image ?: return imageProxy.close()
-        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-        val bitmap = toBitmap(mediaImage)  // 카메라 프레임을 Bitmap으로 변환
+        val bitmap = imageProxyToBitmap(imageProxy)
 
-        // 1️⃣ 전체 이미지 크기
-        val width = bitmap.width
-        val height = bitmap.height
+        val width = bitmap.width.toFloat()
+        val height = bitmap.height.toFloat()
+        val absoluteRect = RectF(
+            cardRectRatio.leftPercent * width,
+            cardRectRatio.topPercent * height,
+            cardRectRatio.rightPercent * width,
+            cardRectRatio.bottomPercent * height
+        )
 
-        // 2️⃣ 카드 가이드 영역 크기 설정 (카드 오버레이와 동일한 비율)
-        val cardRatio = 1.586f // 카드 가로/세로 비율
-        val cardWidth = (width * 0.85f).toInt()  // 화면의 85% 크기
-        val cardHeight = (cardWidth / cardRatio).toInt()
+        val croppedBitmap = cropToRectFPercentage(bitmap, absoluteRect)
+        val croppedInputImage = InputImage.fromBitmap(croppedBitmap, 0)
 
-        // 3️⃣ 카드 영역 위치 계산 (가운데 정렬)
-        val left = ((width - cardWidth) / 2f).toInt()
-        val top = ((height - cardHeight) / 2f).toInt()
-
-        // 4️⃣ 카드 영역만 잘라서 OCR 수행
-        val croppedBitmap = Bitmap.createBitmap(bitmap, left, top, cardWidth, cardHeight)
-        val inputImage = InputImage.fromBitmap(croppedBitmap, rotationDegrees)
-
-        recognizer.process(inputImage)
+        recognizer.process(croppedInputImage)
             .addOnSuccessListener { visionText ->
-                onTextFound(visionText.text)  // 인식된 텍스트 UI에 전달
+                val text = visionText.text
+                if (text.isNotBlank()) {
+                    Log.d("TextAnalyzer", "OCR result:\n$text")
+                    onTextFound(text)
+                }
             }
-            .addOnFailureListener { it.printStackTrace() }
-            .addOnCompleteListener { imageProxy.close() }
+            .addOnFailureListener { e ->
+                Log.e("TextAnalyzer", "Text recognition failed", e)
+            }
+            .addOnCompleteListener {
+                imageProxy.close()
+            }
     }
 
-    private fun toBitmap(image: Image): Bitmap {
-        val yBuffer = image.planes[0].buffer
-        val uBuffer = image.planes[1].buffer
-        val vBuffer = image.planes[2].buffer
+    private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap {
+        val yBuffer = imageProxy.planes[0].buffer
+        val uBuffer = imageProxy.planes[1].buffer
+        val vBuffer = imageProxy.planes[2].buffer
 
         val ySize = yBuffer.remaining()
         val uSize = uBuffer.remaining()
@@ -66,11 +67,19 @@ class TextAnalyzer(
         vBuffer.get(nv21, ySize, vSize)
         uBuffer.get(nv21, ySize + vSize, uSize)
 
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
         val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 100, out)
+        yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 100, out)
         val imageBytes = out.toByteArray()
 
         return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+    }
+
+    private fun cropToRectFPercentage(bitmap: Bitmap, rectF: RectF): Bitmap {
+        val left = rectF.left.toInt().coerceAtLeast(0)
+        val top = rectF.top.toInt().coerceAtLeast(0)
+        val width = (rectF.width()).toInt().coerceAtMost(bitmap.width - left)
+        val height = (rectF.height()).toInt().coerceAtMost(bitmap.height - top)
+        return Bitmap.createBitmap(bitmap, left, top, width, height)
     }
 }
